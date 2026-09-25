@@ -63,6 +63,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #if DT_HAS_COMPAT_STATUS_OKAY(zmk_underglow_layer) && IS_ENABLED(CONFIG_EXPERIMENTAL_RGB_LAYER)
 #define UNDERGLOW_LAYER_ENABLED 1
 static void zmk_rgb_underglow_set_layer(uint8_t layer, bool wakeup);
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_LAYER_OVERLAY)
+#define UNDERGLOW_LAYER_OVERLAY 1
+static void zmk_rgb_underglow_apply_overlay(void);
+#endif
 #endif
 
 #define HUE_MAX 360
@@ -520,6 +524,12 @@ static void zmk_rgb_underglow_tick(struct k_work *work) {
 #endif
     }
 
+#if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
+    if (!state.layer_enabled) {
+        zmk_rgb_underglow_apply_overlay();
+    }
+#endif
+
     zmk_led_write_pixels();
 }
 
@@ -788,6 +798,52 @@ static struct led_rgb hex_to_rgb(uint8_t r, uint8_t g, uint8_t b) {
         b : (hsb.b * (b)) / 0xff
     };
 }
+
+#if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
+// Paint keys claimed by an active layer's rgbmap over the running effect. Keys whose bindings
+// resolve to &trans through every active layer keep the effect's colour.
+static void zmk_rgb_underglow_apply_overlay(void) {
+    uint32_t layer_state = rgb_underglow_layers_state() | BIT(0);
+
+    for (int pixel = 0; pixel < STRIP_NUM_PIXELS; pixel++) {
+        uint8_t midx = rgb_pixel_lookup(pixel);
+        if (midx >= ZMK_KEYMAP_LEN) {
+            continue;
+        }
+
+        for (int layer = ZMK_KEYMAP_LAYERS_LEN - 1; layer >= 0; layer--) {
+            if (!(layer_state & BIT(layer))) {
+                continue;
+            }
+
+            const struct zmk_behavior_binding *bindings = rgb_underglow_get_bindings(layer);
+            if (bindings == NULL) {
+                continue;
+            }
+
+            const struct device *dev = zmk_behavior_get_binding(bindings[midx].behavior_dev);
+            if (dev == NULL) {
+                continue;
+            }
+
+            const struct behavior_driver_api *api = (const struct behavior_driver_api *)dev->api;
+            if (api->binding_pressed == NULL) {
+                continue;
+            }
+
+            struct zmk_behavior_binding_event event = {
+                .position = midx, .layer = layer, .timestamp = k_uptime_get()};
+            int color = api->binding_pressed((struct zmk_behavior_binding *)&bindings[midx], event);
+            if (color == ZMK_BEHAVIOR_TRANSPARENT) {
+                continue;
+            }
+
+            pixels[pixel] = hex_to_rgb((color & 0xFF0000) >> 16, (color & 0xFF00) >> 8, color & 0xFF);
+            break;
+        }
+    }
+}
+#endif // IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
 
 static int zmk_rgb_underglow_apply_merged_rgbmap() {
     LOG_DBG("applying merged rgbmap");

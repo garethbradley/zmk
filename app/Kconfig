@@ -360,6 +360,15 @@ config EXPERIMENTAL_RGB_LAYER
     bool "Experimental per-key per-layer RGB underglow"
     default n
 
+config ZMK_RGB_UNDERGLOW_LAYER_OVERLAY
+    bool "Draw per-layer RGB maps over the current underglow effect"
+    depends on EXPERIMENTAL_RGB_LAYER
+    help
+      Instead of only showing layer rgbmaps via the dedicated layer effect, keep running the
+      selected effect (solid/breathe/spectrum/swirl) and paint any key claimed by an active
+      layer's rgbmap on top of it. Keys that are &trans through every active layer show the
+      effect. Layers without an rgbmap (e.g. the base layer) just show the effect.
+
 endif # ZMK_RGB_UNDERGLOW
 
 menuconfig ZMK_BACKLIGHT
