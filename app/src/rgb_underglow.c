@@ -68,8 +68,11 @@ static void zmk_rgb_underglow_set_layer(uint8_t layer, bool wakeup);
 static void zmk_rgb_underglow_apply_overlay(void);
 #if CONFIG_ZMK_RGB_UNDERGLOW_LAYER_OVERLAY_PREVIEW_MS > 0
 #define UNDERGLOW_PREVIEW 1
-// After an RGB command, show the plain effect (no layer overlay) for a few seconds
+// After an RGB command, show the plain effect (no layer overlay) for a few seconds, or until
+// the top layer changes
 static bool preview_active;
+static uint8_t preview_layer;
+static void rgb_underglow_preview_stop(void);
 #endif
 #endif
 #endif
@@ -576,6 +579,9 @@ static void zmk_rgb_underglow_tick(struct k_work *work) {
 #if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
     bool previewing = false;
 #if IS_ENABLED(UNDERGLOW_PREVIEW)
+    if (preview_active && rgb_underglow_top_layer() != preview_layer) {
+        rgb_underglow_preview_stop();
+    }
     previewing = preview_active;
 #endif
     if (!state.layer_enabled && !previewing) {
@@ -1241,6 +1247,12 @@ static void rgb_underglow_preview_end(struct k_work *work) {
 
 static K_WORK_DELAYABLE_DEFINE(preview_end_work, rgb_underglow_preview_end);
 
+// End the preview early (e.g. the layer it was started on was left)
+static void rgb_underglow_preview_stop(void) {
+    preview_active = false;
+    k_work_reschedule(&preview_end_work, K_NO_WAIT);
+}
+
 static void rgb_underglow_start_preview(void) {
     if (sleep_state.is_awake) {
         if (!state.on) {
@@ -1262,6 +1274,7 @@ static void rgb_underglow_start_preview(void) {
         }
     }
 
+    preview_layer = rgb_underglow_top_layer();
     preview_active = true;
     k_work_reschedule(&preview_end_work, K_MSEC(CONFIG_ZMK_RGB_UNDERGLOW_LAYER_OVERLAY_PREVIEW_MS));
 }
