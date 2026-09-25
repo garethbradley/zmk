@@ -7,6 +7,7 @@
 #include <zephyr/device.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/pm/device.h>
 #include <zephyr/settings/settings.h>
 
 #include <math.h>
@@ -105,6 +106,28 @@ static const struct device *const ext_power = DEVICE_DT_GET(DT_INST(0, zmk_ext_p
 #endif
 
 void zmk_rgb_set_ext_power(void);
+
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA)
+BUILD_ASSERT(DT_ON_BUS(STRIP_CHOSEN, spi),
+             "CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA requires an SPI-driven LED strip");
+
+static const struct device *const strip_bus = DEVICE_DT_GET(DT_BUS(STRIP_CHOSEN));
+static bool data_parked;
+
+static void zmk_rgb_underglow_park_data(bool park) {
+    if (park == data_parked) {
+        return;
+    }
+
+    int rc = pm_device_action_run(strip_bus,
+                                  park ? PM_DEVICE_ACTION_SUSPEND : PM_DEVICE_ACTION_RESUME);
+    if (rc < 0 && rc != -EALREADY) {
+        LOG_ERR("Unable to %s LED data line: %d", park ? "park" : "unpark", rc);
+        return;
+    }
+    data_parked = park;
+}
+#endif
 
 static struct zmk_led_hsb hsb_scale_min_max(struct zmk_led_hsb hsb) {
     hsb.b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_MIN +
@@ -237,6 +260,16 @@ static void zmk_led_write_pixels(void) {
     int bat0;
     int blend = 0;
     int reset_ext_power = 0;
+
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA)
+    if (data_parked) {
+        if (!(state.on || state.status_active)) {
+            // LEDs are unpowered; keep the data line disconnected
+            return;
+        }
+        zmk_rgb_set_ext_power();
+    }
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     bat0 = zmk_battery_state_of_charge();
@@ -533,7 +566,20 @@ static int rgb_settings_set(const char *name, size_t len, settings_read_cb read_
     return -ENOENT;
 }
 
-SETTINGS_STATIC_HANDLER_DEFINE(rgb_underglow, "rgb/underglow", NULL, rgb_settings_set, NULL, NULL);
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA)
+// Runs after ext_power's commit (handlers are sorted by name), so LED power and the data line
+// end up matching the restored underglow state rather than ext_power's own saved state.
+static int rgb_settings_commit(void) {
+    zmk_rgb_set_ext_power();
+    return 0;
+}
+#define RGB_SETTINGS_COMMIT rgb_settings_commit
+#else
+#define RGB_SETTINGS_COMMIT NULL
+#endif
+
+SETTINGS_STATIC_HANDLER_DEFINE(rgb_underglow, "rgb/underglow", NULL, rgb_settings_set,
+                               RGB_SETTINGS_COMMIT, NULL);
 
 static void zmk_rgb_underglow_save_state_work(struct k_work *_work) {
     settings_save_one("rgb/underglow/state", &state, sizeof(state));
@@ -622,6 +668,12 @@ void zmk_rgb_set_ext_power(void) {
     }
 #endif // CONFIG_ZMK_BATTERY_REPORTING
 
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA)
+    if (desired_state) {
+        zmk_rgb_underglow_park_data(false);
+    }
+#endif
+
     if (desired_state && !c_power) {
         int rc = ext_power_enable(ext_power);
         if (rc != 0) {
@@ -633,6 +685,12 @@ void zmk_rgb_set_ext_power(void) {
             LOG_ERR("Unable to disable EXT_POWER: %d", rc);
         }
     }
+
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA)
+    if (!desired_state) {
+        zmk_rgb_underglow_park_data(true);
+    }
+#endif
 #endif // CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER
 }
 
@@ -666,6 +724,9 @@ static void zmk_rgb_underglow_off_handler(struct k_work *work) {
     }
 
     zmk_led_write_pixels();
+
+    // Only cut power once the blank frame has been sent, otherwise the LEDs never receive it
+    zmk_rgb_set_ext_power();
 }
 
 K_WORK_DEFINE(underglow_off_work, zmk_rgb_underglow_off_handler);
@@ -684,7 +745,7 @@ int zmk_rgb_underglow_transient_off(void) {
 
     k_timer_stop(&underglow_tick);
     state.on = false;
-    zmk_rgb_set_ext_power();
+    // EXT_POWER is switched off by underglow_off_work, after the blank frame
 
     return 0;
 }

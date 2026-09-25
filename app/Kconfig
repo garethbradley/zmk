@@ -295,6 +295,17 @@ if ZMK_RGB_UNDERGLOW
 config ZMK_RGB_UNDERGLOW_EXT_POWER
     bool "RGB underglow toggling also controls external power"
 
+config ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA
+    bool "Disconnect the LED data line while external power is off"
+    depends on ZMK_RGB_UNDERGLOW_EXT_POWER
+    select PM_DEVICE
+    help
+      Suspend the LED strip's SPI bus (applying its "sleep" pinctrl state) whenever
+      external power is off, so the data line is left high-impedance. Needed when
+      the LEDs are power-switched on their ground side: a data line driven low
+      otherwise back-powers the chain through the first LED's input protection
+      diode, causing flicker while the LEDs are meant to be off.
+
 config ZMK_RGB_UNDERGLOW_BRT_MIN
     int "RGB underglow minimum brightness in percent"
     range 0 100
