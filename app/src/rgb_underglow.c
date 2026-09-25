@@ -111,6 +111,13 @@ static const struct device *const ext_power = DEVICE_DT_GET(DT_INST(0, zmk_ext_p
 
 void zmk_rgb_set_ext_power(void);
 
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE) &&                                          \
+    defined(CONFIG_ZMK_RGB_UNDERGLOW_IDLE_USB_DIM) && CONFIG_ZMK_RGB_UNDERGLOW_IDLE_USB_DIM > 0
+#define UNDERGLOW_IDLE_DIM 1
+// Idle while on USB power: keep running, but at CONFIG_ZMK_RGB_UNDERGLOW_IDLE_USB_DIM percent
+static bool idle_dimmed;
+#endif
+
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA)
 BUILD_ASSERT(DT_ON_BUS(STRIP_CHOSEN, spi),
              "CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER_PARK_DATA requires an SPI-driven LED strip");
@@ -286,7 +293,12 @@ static void zmk_led_write_pixels(void) {
     }
 
     // fast path: no status indicators, battery level OK
-    if (blend == 0 && bat0 >= 20) {
+    bool dim = false;
+#if IS_ENABLED(UNDERGLOW_IDLE_DIM)
+    dim = idle_dimmed;
+#endif
+
+    if (blend == 0 && bat0 >= 20 && !dim) {
         led_strip_update_rgb(led_strip, pixels, STRIP_NUM_PIXELS);
         return;
     }
@@ -332,6 +344,16 @@ static void zmk_led_write_pixels(void) {
             led_buffer[i].b = led_buffer[i].b >> 1;
         }
     }
+
+#if IS_ENABLED(UNDERGLOW_IDLE_DIM)
+    if (dim) {
+        for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
+            led_buffer[i].r = led_buffer[i].r * CONFIG_ZMK_RGB_UNDERGLOW_IDLE_USB_DIM / 100;
+            led_buffer[i].g = led_buffer[i].g * CONFIG_ZMK_RGB_UNDERGLOW_IDLE_USB_DIM / 100;
+            led_buffer[i].b = led_buffer[i].b * CONFIG_ZMK_RGB_UNDERGLOW_IDLE_USB_DIM / 100;
+        }
+    }
+#endif
 
     int err = led_strip_update_rgb(led_strip, led_buffer, STRIP_NUM_PIXELS);
     if (err < 0) {
@@ -1115,12 +1137,12 @@ struct rgb_underglow_sleep_state {
     bool rgb_state_before_sleeping;
 };
 
-static int rgb_underglow_auto_state(bool target_wake_state) {
-    static struct rgb_underglow_sleep_state sleep_state = {
-        is_awake : true,
-        rgb_state_before_sleeping : false
-    };
+static struct rgb_underglow_sleep_state sleep_state = {
+    is_awake : true,
+    rgb_state_before_sleeping : false
+};
 
+static int rgb_underglow_auto_state(bool target_wake_state) {
     // wake up event while awake, or sleep event while sleeping -> no-op
     if (target_wake_state == sleep_state.is_awake) {
         return 0;
@@ -1128,6 +1150,17 @@ static int rgb_underglow_auto_state(bool target_wake_state) {
     sleep_state.is_awake = target_wake_state;
 
     if (sleep_state.is_awake) {
+#if IS_ENABLED(UNDERGLOW_IDLE_DIM)
+        if (idle_dimmed) {
+            idle_dimmed = false;
+#if IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
+            if (state.layer_enabled) {
+                zmk_rgb_underglow_set_layer(rgb_underglow_top_layer(), true);
+            }
+#endif
+            return 0;
+        }
+#endif
 #if IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
         if (state.layer_enabled) {
             zmk_rgb_underglow_set_layer(rgb_underglow_top_layer(), true);
@@ -1141,9 +1174,35 @@ static int rgb_underglow_auto_state(bool target_wake_state) {
         }
     } else {
         sleep_state.rgb_state_before_sleeping = state.on;
+#if IS_ENABLED(UNDERGLOW_IDLE_DIM)
+        if (state.on && zmk_usb_is_powered()) {
+            idle_dimmed = true;
+            return 0;
+        }
+#endif
         return zmk_rgb_underglow_transient_off();
     }
 }
+
+#if IS_ENABLED(UNDERGLOW_IDLE_DIM)
+// USB plugged/unplugged while idle: switch between dimmed (USB) and off (battery)
+static int rgb_underglow_idle_usb_changed(void) {
+    if (sleep_state.is_awake) {
+        return 0;
+    }
+
+    bool powered = zmk_usb_is_powered();
+    if (idle_dimmed && !powered) {
+        idle_dimmed = false;
+        return zmk_rgb_underglow_transient_off();
+    }
+    if (!idle_dimmed && powered && sleep_state.rgb_state_before_sleeping) {
+        idle_dimmed = true;
+        return zmk_rgb_underglow_transient_on();
+    }
+    return 0;
+}
+#endif
 
 static int rgb_underglow_event_listener(const zmk_event_t *eh) {
 
@@ -1181,6 +1240,10 @@ static int rgb_underglow_event_listener(const zmk_event_t *eh) {
     if (as_zmk_usb_conn_state_changed(eh)) {
         return rgb_underglow_auto_state(zmk_usb_is_powered());
     }
+#elif IS_ENABLED(UNDERGLOW_IDLE_DIM)
+    if (as_zmk_usb_conn_state_changed(eh)) {
+        return rgb_underglow_idle_usb_changed();
+    }
 #endif
 
     return -ENOTSUP;
@@ -1195,7 +1258,7 @@ ZMK_LISTENER(rgb_underglow, rgb_underglow_event_listener);
 ZMK_SUBSCRIPTION(rgb_underglow, zmk_activity_state_changed);
 #endif
 
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB) || IS_ENABLED(UNDERGLOW_IDLE_DIM)
 ZMK_SUBSCRIPTION(rgb_underglow, zmk_usb_conn_state_changed);
 #endif
 

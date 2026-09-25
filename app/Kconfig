@@ -356,6 +356,16 @@ config ZMK_RGB_UNDERGLOW_AUTO_OFF_USB
     bool "Turn off RGB underglow when USB is disconnected"
     depends on USB_DEVICE_STACK
 
+config ZMK_RGB_UNDERGLOW_IDLE_USB_DIM
+    int "RGB underglow brightness (percent) when idle on USB power; 0 turns it off"
+    range 0 100
+    default 0
+    depends on ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE && USB_DEVICE_STACK
+    help
+      With AUTO_OFF_IDLE, going idle normally turns underglow off. When this is non-zero and
+      the device has USB power, it instead keeps running at this percentage of its normal
+      brightness. On battery it still turns off.
+
 config EXPERIMENTAL_RGB_LAYER
     bool "Experimental per-key per-layer RGB underglow"
     default n
