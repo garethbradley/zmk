@@ -14,6 +14,8 @@ struct zmk_led_hsb {
 
 int zmk_rgb_underglow_toggle(void);
 int zmk_rgb_underglow_get_state(bool *state);
+// Called after an RGB behavior command is applied (on every half of a split)
+void zmk_rgb_underglow_command_applied(void);
 int zmk_rgb_underglow_on(void);
 int zmk_rgb_underglow_off(void);
 int zmk_rgb_underglow_transient_on(void);

@@ -356,6 +356,13 @@ config ZMK_RGB_UNDERGLOW_AUTO_OFF_USB
     bool "Turn off RGB underglow when USB is disconnected"
     depends on USB_DEVICE_STACK
 
+config ZMK_RGB_UNDERGLOW_SYNC_ANIMATION
+    bool "Drive effect animations from the time since the last RGB command"
+    help
+      Breathe/spectrum/swirl phase is computed from the time since the last RGB command rather
+      than accumulated per tick. Split halves receive each RGB command at about the same time,
+      so their animations stay in phase, and waking from idle doesn't restart the animation.
+
 config ZMK_RGB_UNDERGLOW_IDLE_USB_DIM
     int "RGB underglow brightness (percent) when idle on USB power; 0 turns it off"
     range 0 100
@@ -378,6 +385,15 @@ config ZMK_RGB_UNDERGLOW_LAYER_OVERLAY
       selected effect (solid/breathe/spectrum/swirl) and paint any key claimed by an active
       layer's rgbmap on top of it. Keys that are &trans through every active layer show the
       effect. Layers without an rgbmap (e.g. the base layer) just show the effect.
+
+config ZMK_RGB_UNDERGLOW_LAYER_OVERLAY_PREVIEW_MS
+    int "Show the plain effect for this long (ms) after an RGB command; 0 disables"
+    default 5000
+    depends on ZMK_RGB_UNDERGLOW_LAYER_OVERLAY
+    help
+      After an RGB key (effect, hue, saturation, brightness, speed, on) the layer overlay is
+      suppressed for this long so the effect can be previewed. An idle half is lit for the
+      preview and returns to its idle state afterwards.
 
 endif # ZMK_RGB_UNDERGLOW
 

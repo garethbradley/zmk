@@ -66,7 +66,19 @@ static void zmk_rgb_underglow_set_layer(uint8_t layer, bool wakeup);
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_LAYER_OVERLAY)
 #define UNDERGLOW_LAYER_OVERLAY 1
 static void zmk_rgb_underglow_apply_overlay(void);
+#if CONFIG_ZMK_RGB_UNDERGLOW_LAYER_OVERLAY_PREVIEW_MS > 0
+#define UNDERGLOW_PREVIEW 1
+// After an RGB command, show the plain effect (no layer overlay) for a few seconds
+static bool preview_active;
 #endif
+#endif
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_SYNC_ANIMATION)
+// Animations are driven by time since the last RGB command, which every half receives at about
+// the same moment, so split halves stay in phase (and waking from idle doesn't restart them).
+#define UNDERGLOW_TICK_MS 25
+static int64_t animation_epoch;
 #endif
 
 #define HUE_MAX 360
@@ -526,6 +538,21 @@ static inline struct led_rgb hue_sat(int hue, int sat) {
 }
 
 static void zmk_rgb_underglow_tick(struct k_work *work) {
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_SYNC_ANIMATION)
+    uint32_t ticks = (uint32_t)((k_uptime_get() - animation_epoch) / UNDERGLOW_TICK_MS);
+    switch (state.current_effect) {
+    case UNDERGLOW_EFFECT_BREATHE:
+        state.animation_step = (ticks * state.animation_speed * 10) % 2400;
+        break;
+    case UNDERGLOW_EFFECT_SPECTRUM:
+        state.animation_step = (ticks * state.animation_speed) % HUE_MAX;
+        break;
+    case UNDERGLOW_EFFECT_SWIRL:
+        state.animation_step = (ticks * state.animation_speed * 2) % HUE_MAX;
+        break;
+    }
+#endif
+
     switch (state.current_effect) {
     case UNDERGLOW_EFFECT_SOLID:
         zmk_rgb_underglow_effect_solid();
@@ -547,7 +574,11 @@ static void zmk_rgb_underglow_tick(struct k_work *work) {
     }
 
 #if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
-    if (!state.layer_enabled) {
+    bool previewing = false;
+#if IS_ENABLED(UNDERGLOW_PREVIEW)
+    previewing = preview_active;
+#endif
+    if (!state.layer_enabled && !previewing) {
         zmk_rgb_underglow_apply_overlay();
     }
 #endif
@@ -1184,6 +1215,58 @@ static int rgb_underglow_auto_state(bool target_wake_state) {
     }
 }
 
+#if IS_ENABLED(UNDERGLOW_PREVIEW)
+// Set when the preview had to light up an idle half; it goes back to its idle state afterwards
+static bool preview_woke;
+
+static void rgb_underglow_preview_end(struct k_work *work) {
+    preview_active = false;
+
+    if (!preview_woke) {
+        return;
+    }
+    preview_woke = false;
+
+    if (sleep_state.is_awake) {
+        return;
+    }
+#if IS_ENABLED(UNDERGLOW_IDLE_DIM)
+    if (zmk_usb_is_powered()) {
+        idle_dimmed = true;
+        return;
+    }
+#endif
+    zmk_rgb_underglow_transient_off();
+}
+
+static K_WORK_DELAYABLE_DEFINE(preview_end_work, rgb_underglow_preview_end);
+
+static void rgb_underglow_start_preview(void) {
+    if (sleep_state.is_awake) {
+        if (!state.on) {
+            return; // explicitly off
+        }
+    } else {
+        if (!sleep_state.rgb_state_before_sleeping) {
+            return; // was off before going idle
+        }
+#if IS_ENABLED(UNDERGLOW_IDLE_DIM)
+        if (idle_dimmed) {
+            idle_dimmed = false;
+            preview_woke = true;
+        }
+#endif
+        if (!state.on) {
+            zmk_rgb_underglow_transient_on();
+            preview_woke = true;
+        }
+    }
+
+    preview_active = true;
+    k_work_reschedule(&preview_end_work, K_MSEC(CONFIG_ZMK_RGB_UNDERGLOW_LAYER_OVERLAY_PREVIEW_MS));
+}
+#endif // IS_ENABLED(UNDERGLOW_PREVIEW)
+
 #if IS_ENABLED(UNDERGLOW_IDLE_DIM)
 // USB plugged/unplugged while idle: switch between dimmed (USB) and off (battery)
 static int rgb_underglow_idle_usb_changed(void) {
@@ -1266,5 +1349,14 @@ ZMK_SUBSCRIPTION(rgb_underglow, zmk_usb_conn_state_changed);
 ZMK_SUBSCRIPTION(rgb_underglow, zmk_split_peripheral_layer_changed);
 ZMK_SUBSCRIPTION(rgb_underglow, zmk_underglow_color_changed);
 #endif
+
+void zmk_rgb_underglow_command_applied(void) {
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_SYNC_ANIMATION)
+    animation_epoch = k_uptime_get();
+#endif
+#if IS_ENABLED(UNDERGLOW_PREVIEW)
+    rgb_underglow_start_preview();
+#endif
+}
 
 SYS_INIT(zmk_rgb_underglow_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

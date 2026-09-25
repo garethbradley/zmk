@@ -207,8 +207,7 @@ on_keymap_binding_convert_central_state_dependent_params(struct zmk_behavior_bin
     return 0;
 };
 
-static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
-                                     struct zmk_behavior_binding_event event) {
+static int rgb_underglow_apply_command(struct zmk_behavior_binding *binding) {
     switch (binding->param1) {
     case RGB_TOG_CMD:
         return zmk_rgb_underglow_toggle();
@@ -247,6 +246,17 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
     }
 
     return -ENOTSUP;
+}
+
+static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
+                                     struct zmk_behavior_binding_event event) {
+    int ret = rgb_underglow_apply_command(binding);
+
+    // Runs on every half with the same (central-converted) command at about the same time
+    if (ret >= 0 && binding->param1 != RGB_OFF_CMD && binding->param1 != RGB_STATUS_CMD) {
+        zmk_rgb_underglow_command_applied();
+    }
+    return ret;
 }
 
 static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
