@@ -542,16 +542,19 @@ static inline struct led_rgb hue_sat(int hue, int sat) {
 
 static void zmk_rgb_underglow_tick(struct k_work *work) {
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_SYNC_ANIMATION)
-    uint32_t ticks = (uint32_t)((k_uptime_get() - animation_epoch) / UNDERGLOW_TICK_MS);
+    // Same per-tick increments as the stock effects, scaled by elapsed time (and slowed down by
+    // CONFIG_ZMK_RGB_UNDERGLOW_ANIMATION_SLOWDOWN) rather than counted per tick
+    uint64_t elapsed_ms = k_uptime_get() - animation_epoch;
+    uint64_t ms_per_step = UNDERGLOW_TICK_MS * CONFIG_ZMK_RGB_UNDERGLOW_ANIMATION_SLOWDOWN;
     switch (state.current_effect) {
     case UNDERGLOW_EFFECT_BREATHE:
-        state.animation_step = (ticks * state.animation_speed * 10) % 2400;
+        state.animation_step = (elapsed_ms * state.animation_speed * 10 / ms_per_step) % 2400;
         break;
     case UNDERGLOW_EFFECT_SPECTRUM:
-        state.animation_step = (ticks * state.animation_speed) % HUE_MAX;
+        state.animation_step = (elapsed_ms * state.animation_speed / ms_per_step) % HUE_MAX;
         break;
     case UNDERGLOW_EFFECT_SWIRL:
-        state.animation_step = (ticks * state.animation_speed * 2) % HUE_MAX;
+        state.animation_step = (elapsed_ms * state.animation_speed * 2 / ms_per_step) % HUE_MAX;
         break;
     }
 #endif

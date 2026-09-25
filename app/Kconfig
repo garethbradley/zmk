@@ -363,6 +363,15 @@ config ZMK_RGB_UNDERGLOW_SYNC_ANIMATION
       than accumulated per tick. Split halves receive each RGB command at about the same time,
       so their animations stay in phase, and waking from idle doesn't restart the animation.
 
+config ZMK_RGB_UNDERGLOW_ANIMATION_SLOWDOWN
+    int "Slow breathe/spectrum/swirl animations down by this factor"
+    range 1 20
+    default 1
+    depends on ZMK_RGB_UNDERGLOW_SYNC_ANIMATION
+    help
+      Divides the animation rate on top of the speed setting (RGB_SPI/RGB_SPD, 1-5), for
+      animations slower than speed 1 allows. 4 makes every speed four times slower.
+
 config ZMK_RGB_UNDERGLOW_IDLE_USB_DIM
     int "RGB underglow brightness (percent) when idle on USB power; 0 turns it off"
     range 0 100
