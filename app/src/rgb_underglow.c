@@ -574,7 +574,12 @@ static void zmk_rgb_underglow_tick(struct k_work *work) {
         break;
 #if IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
     case UNDERGLOW_EFFECT_LAYER_INDICATORS:
+#if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
+        // "Layer colours only": no base animation, the overlay below paints the layer maps
+        memset(pixels, 0, sizeof(pixels));
+#else
         zmk_rgb_underglow_effect_layer();
+#endif
         break;
 #endif
     }
@@ -620,12 +625,8 @@ static int rgb_settings_set(const char *name, size_t len, settings_read_cb read_
         rc = read_cb(cb_arg, &state, sizeof(state));
         if (rc >= 0) {
 #if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
-            // Saved while the standalone layer effect was selected: fall back to a normal effect
-            if (state.current_effect == UNDERGLOW_EFFECT_LAYER_INDICATORS || state.layer_enabled) {
-                state.current_effect = CONFIG_ZMK_RGB_UNDERGLOW_EFF_START;
-                state.layer_enabled = false;
-                state.on = true;
-            }
+            // The standalone layer mode isn't used with the overlay (see the tick)
+            state.layer_enabled = false;
 #endif
             if (state.on) {
 #if IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
@@ -776,7 +777,8 @@ void zmk_rgb_set_ext_power(void) {
 
 int zmk_rgb_underglow_on(void) {
 #if IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
-    if (state.current_effect == UNDERGLOW_EFFECT_LAYER_INDICATORS) {
+    if (state.current_effect == UNDERGLOW_EFFECT_LAYER_INDICATORS &&
+        !IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)) {
         state.layer_enabled = true;
     }
 #endif
@@ -831,16 +833,7 @@ int zmk_rgb_underglow_transient_off(void) {
 }
 
 int zmk_rgb_underglow_calc_effect(int direction) {
-    int effect =
-        (state.current_effect + UNDERGLOW_EFFECT_NUMBER + direction) % UNDERGLOW_EFFECT_NUMBER;
-#if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
-    // With the overlay, layer maps already show on top of every effect. The standalone layer
-    // effect would only turn the LEDs off on layers without a map, so skip it.
-    if (effect == UNDERGLOW_EFFECT_LAYER_INDICATORS) {
-        effect = (effect + UNDERGLOW_EFFECT_NUMBER + direction) % UNDERGLOW_EFFECT_NUMBER;
-    }
-#endif
-    return effect;
+    return (state.current_effect + UNDERGLOW_EFFECT_NUMBER + direction) % UNDERGLOW_EFFECT_NUMBER;
 }
 
 int zmk_rgb_underglow_select_effect(int effect) {
@@ -850,16 +843,11 @@ int zmk_rgb_underglow_select_effect(int effect) {
     if (effect < 0 || effect >= UNDERGLOW_EFFECT_NUMBER) {
         return -EINVAL;
     }
-#if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
-    if (effect == UNDERGLOW_EFFECT_LAYER_INDICATORS) {
-        return -EINVAL;
-    }
-#endif
-
     state.current_effect = effect;
     state.animation_step = 0;
 #if IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
-    state.layer_enabled = (effect == UNDERGLOW_EFFECT_LAYER_INDICATORS);
+    state.layer_enabled = (effect == UNDERGLOW_EFFECT_LAYER_INDICATORS) &&
+                          !IS_ENABLED(UNDERGLOW_LAYER_OVERLAY);
 #endif
     return zmk_rgb_underglow_save_state();
 }
@@ -1279,6 +1267,12 @@ static void rgb_underglow_preview_stop(void) {
 }
 
 static void rgb_underglow_start_preview(void) {
+    if (state.current_effect == UNDERGLOW_EFFECT_LAYER_INDICATORS) {
+        // "Layer colours only" has nothing to preview; show the layer colours straight away
+        preview_active = false;
+        return;
+    }
+
     if (sleep_state.is_awake) {
         if (!state.on) {
             return; // explicitly off

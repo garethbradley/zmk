@@ -395,6 +395,10 @@ config ZMK_RGB_UNDERGLOW_LAYER_OVERLAY
       layer's rgbmap on top of it. Keys that are &trans through every active layer show the
       effect. Layers without an rgbmap (e.g. the base layer) just show the effect.
 
+      The layer effect (last in the RGB_EFF cycle) becomes "layer colours only": no base
+      animation, just the active layer's rgbmap. Unlike the standalone layer effect, it doesn't
+      switch underglow off on layers without a map.
+
 config ZMK_RGB_UNDERGLOW_LAYER_OVERLAY_PREVIEW_MS
     int "Show the plain effect for this long (ms) after an RGB command; 0 disables"
     default 5000
