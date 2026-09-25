@@ -616,6 +616,14 @@ static int rgb_settings_set(const char *name, size_t len, settings_read_cb read_
 
         rc = read_cb(cb_arg, &state, sizeof(state));
         if (rc >= 0) {
+#if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
+            // Saved while the standalone layer effect was selected: fall back to a normal effect
+            if (state.current_effect == UNDERGLOW_EFFECT_LAYER_INDICATORS || state.layer_enabled) {
+                state.current_effect = CONFIG_ZMK_RGB_UNDERGLOW_EFF_START;
+                state.layer_enabled = false;
+                state.on = true;
+            }
+#endif
             if (state.on) {
 #if IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
                 if (state.layer_enabled) {
@@ -820,7 +828,16 @@ int zmk_rgb_underglow_transient_off(void) {
 }
 
 int zmk_rgb_underglow_calc_effect(int direction) {
-    return (state.current_effect + UNDERGLOW_EFFECT_NUMBER + direction) % UNDERGLOW_EFFECT_NUMBER;
+    int effect =
+        (state.current_effect + UNDERGLOW_EFFECT_NUMBER + direction) % UNDERGLOW_EFFECT_NUMBER;
+#if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
+    // With the overlay, layer maps already show on top of every effect. The standalone layer
+    // effect would only turn the LEDs off on layers without a map, so skip it.
+    if (effect == UNDERGLOW_EFFECT_LAYER_INDICATORS) {
+        effect = (effect + UNDERGLOW_EFFECT_NUMBER + direction) % UNDERGLOW_EFFECT_NUMBER;
+    }
+#endif
+    return effect;
 }
 
 int zmk_rgb_underglow_select_effect(int effect) {
@@ -830,6 +847,11 @@ int zmk_rgb_underglow_select_effect(int effect) {
     if (effect < 0 || effect >= UNDERGLOW_EFFECT_NUMBER) {
         return -EINVAL;
     }
+#if IS_ENABLED(UNDERGLOW_LAYER_OVERLAY)
+    if (effect == UNDERGLOW_EFFECT_LAYER_INDICATORS) {
+        return -EINVAL;
+    }
+#endif
 
     state.current_effect = effect;
     state.animation_step = 0;
